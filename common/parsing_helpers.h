@@ -172,6 +172,65 @@ static __always_inline int parse_iphdr(struct hdr_cursor *nh,
 
 	return iph->protocol;
 }
+static __always_inline __u32 parse_iphdr_saddr(struct hdr_cursor *nh,
+				       void *data_end,
+				       struct iphdr **iphdr)
+{
+	struct iphdr *iph = nh->pos;
+	int hdrsize;
+
+	if (iph + 1 > data_end){
+		bpf_printk("A1");
+		return -1;
+
+	}
+
+	hdrsize = iph->ihl * 4;
+	/* Sanity check packet field is valid */
+	if(hdrsize < sizeof(*iph)){
+		bpf_printk("A2");
+		return -1;
+	}
+	/* Variable-length IPv4 header, need to use byte-based arithmetic */
+	if (nh->pos + hdrsize > data_end){
+		bpf_printk("A3");
+		return -1;
+	}
+	nh->pos += hdrsize;
+	*iphdr = iph;
+	// bpf_printk("addrs.saddr = %u saddr = %u",iph->addrs.saddr,iph->saddr);
+	return iph->saddr;
+}
+static __always_inline __u32 parse_iphdr_daddr(struct hdr_cursor *nh,
+				       void *data_end,
+				       struct iphdr **iphdr)
+{
+	struct iphdr *iph = nh->pos;
+	int hdrsize;
+
+	if (iph + 1 > data_end){
+		bpf_printk("B1");
+		return -1;
+
+	}
+
+	hdrsize = iph->ihl * 4;
+	/* Sanity check packet field is valid */
+	if(hdrsize < sizeof(*iph)){
+		bpf_printk("B2");
+		return -1;
+	}
+	/* Variable-length IPv4 header, need to use byte-based arithmetic */
+	if (nh->pos + hdrsize > data_end){
+		bpf_printk("B3");
+		return -1;
+	}
+
+	nh->pos += hdrsize;
+	*iphdr = iph;
+
+	return iph->daddr;
+}
 
 static __always_inline int parse_icmp6hdr(struct hdr_cursor *nh,
 					  void *data_end,
@@ -267,6 +326,65 @@ static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
 	*tcphdr = h;
 
 	return len;
+}
+static __always_inline __u32 parse_tcphdr_source(struct hdr_cursor *nh,
+					void *data_end,
+					struct tcphdr **tcphdr)
+{
+	int len;
+	struct tcphdr *h = nh->pos;
+
+	if (h + 1 > data_end){
+		bpf_printk("C1");
+		return -1;
+	}
+
+	len = h->doff * 4;
+	/* Sanity check packet field is valid */
+	if(len < sizeof(*h)){
+		bpf_printk("C2");
+		return -1;
+	}
+
+	/* Variable-length TCP header, need to use byte-based arithmetic */
+	if (nh->pos + len > data_end){
+		bpf_printk("C3");
+		return -1;
+	}
+
+	nh->pos += len;
+	*tcphdr = h;
+
+	return h->source;
+}
+static __always_inline __u32 parse_tcphdr_dest(struct hdr_cursor *nh,
+					void *data_end,
+					struct tcphdr **tcphdr)
+{
+	int len;
+	struct tcphdr *h = nh->pos;
+
+	if (h + 1 > data_end){
+		bpf_printk("D1");
+		return -1;
+	}
+
+	len = h->doff * 4;
+	/* Sanity check packet field is valid */
+	if(len < sizeof(*h)){
+		bpf_printk("D2");
+		return -1;
+	}
+
+	/* Variable-length TCP header, need to use byte-based arithmetic */
+	if (nh->pos + len > data_end){
+		bpf_printk("D3");
+		return -1;
+	}
+	//nh->pos += len;
+	*tcphdr = h;
+
+	return h->dest;
 }
 
 #endif /* __PARSING_HELPERS_H */

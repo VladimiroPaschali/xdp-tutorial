@@ -7,7 +7,22 @@
 /* This is the data record stored in the map */
 struct datarec {
 	__u64 rx_packets;
-	/* Assignment#1: Add byte counters */
+	__u64 rx_bytes;
+
+};
+
+#define CMS_ROWS 4
+#define CMS_SIZE 131072
+// #define CMS_SIZE 10
+
+
+#define RIGA 0
+// #define COLONNA 131071
+#define COLONNA 84130
+
+
+struct Cms {
+    int cms[CMS_ROWS][CMS_SIZE];
 };
 
 #ifndef XDP_ACTION_MAX

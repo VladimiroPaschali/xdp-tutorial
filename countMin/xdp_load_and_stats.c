@@ -22,6 +22,7 @@ static const char *__doc__ = "XDP loader and stats program\n"
 #include "../common/common_params.h"
 #include "../common/common_user_bpf_xdp.h"
 #include "common_kern_user.h"
+#include <signal.h>
 
 static const char *default_filename = "xdp_prog_kern.o";
 static const char *default_progname = "xdp_stats1_func";
@@ -91,14 +92,20 @@ static __u64 gettime(void)
 	return (__u64) t.tv_sec * NANOSEC_PER_SEC + t.tv_nsec;
 }
 
+// struct record {
+// 	__u64 timestamp;
+// 	struct datarec total; /* defined in common_kern_user.h */
+// };
 struct record {
 	__u64 timestamp;
-	struct datarec total; /* defined in common_kern_user.h */
+	struct Cms total; /* defined in common_kern_user.h */
 };
 
+
 struct stats_record {
-	struct record stats[1]; /* Assignment#2: Hint */
+	struct record stats[1];
 };
+
 
 static double calc_period(struct record *r, struct record *p)
 {
@@ -111,21 +118,25 @@ static double calc_period(struct record *r, struct record *p)
 
 	return period_;
 }
+static void stats_print_header()
+{
+	/* Print stats "header" */
+	printf("%-12s\n", "XDP-action");
+}
 
 static void stats_print(struct stats_record *stats_rec,
 			struct stats_record *stats_prev)
 {
+	// printf("stats_print\n");
 	struct record *rec, *prev;
 	double period;
 	__u64 packets;
 	double pps; /* packets per sec */
 
-	/* Assignment#2: Print other XDP actions stats  */
 	{
 		char *fmt = "%-12s %'11lld pkts (%'10.0f pps)"
 			//" %'11lld Kbytes (%'6.0f Mbits/s)"
 			" period:%f\n";
-		const char *action = action2str(XDP_PASS);
 		rec  = &stats_rec->stats[0];
 		prev = &stats_prev->stats[0];
 
@@ -133,35 +144,88 @@ static void stats_print(struct stats_record *stats_rec,
 		if (period == 0)
 		       return;
 
-		packets = rec->total.rx_packets - prev->total.rx_packets;
+		packets = rec->total.cms[RIGA][COLONNA] - prev->total.cms[RIGA][COLONNA];
 		pps     = packets / period;
 
-		printf(fmt, action, rec->total.rx_packets, pps, period);
+		printf(fmt, "CMS[0][131071]", rec->total.cms[RIGA][COLONNA], pps, period);
 	}
 }
 
+// /* BPF_MAP_TYPE_ARRAY */
+// void map_get_value_array(int fd, __u32 key, struct datarec *value)
+// {
+// 	if ((bpf_map_lookup_elem(fd, &key, value)) != 0) {
+// 		fprintf(stderr,
+// 			"ERR: bpf_map_lookup_elem failed key:0x%X\n", key);
+// 	}
+// }
 /* BPF_MAP_TYPE_ARRAY */
-void map_get_value_array(int fd, __u32 key, struct datarec *value)
+void map_get_value_array(int fd, __u32 key, struct Cms *value)
 {
+	// printf("map_get_value_array\n");
 	if ((bpf_map_lookup_elem(fd, &key, value)) != 0) {
 		fprintf(stderr,
 			"ERR: bpf_map_lookup_elem failed key:0x%X\n", key);
 	}
+	// printf("map_get_value_array 2 \n");
+
 }
 
 /* BPF_MAP_TYPE_PERCPU_ARRAY */
 void map_get_value_percpu_array(int fd, __u32 key, struct datarec *value)
 {
 	/* For percpu maps, userspace gets a value per possible CPU */
-	// unsigned int nr_cpus = bpf_num_possible_cpus();
-	// struct datarec values[nr_cpus];
+	unsigned int nr_cpus = libbpf_num_possible_cpus();
+	struct datarec values[nr_cpus];
+	__u64 sum_bytes = 0;
+	__u64 sum_pkts = 0;
+	int i;
 
-	fprintf(stderr, "ERR: %s() not impl. see assignment#3", __func__);
+	if ((bpf_map_lookup_elem(fd, &key, values)) != 0) {
+		fprintf(stderr,
+			"ERR: bpf_map_lookup_elem failed key:0x%X\n", key);
+		return;
+	}
+
+	/* Sum values from each CPU */
+	for (i = 0; i < nr_cpus; i++) {
+		sum_pkts  += values[i].rx_packets;
+		sum_bytes += values[i].rx_bytes;
+	}
+	value->rx_packets = sum_pkts;
+	value->rx_bytes   = sum_bytes;
 }
 
+// static bool map_collect(int fd, __u32 map_type, __u32 key, struct record *rec)
+// {
+// 	struct datarec value;
+
+// 	/* Get time as close as possible to reading map contents */
+// 	rec->timestamp = gettime();
+
+// 	switch (map_type) {
+// 	case BPF_MAP_TYPE_ARRAY:
+// 		map_get_value_array(fd, key, &value);
+// 		break;
+// 	case BPF_MAP_TYPE_PERCPU_ARRAY:
+// 		map_get_value_percpu_array(fd, key, &value);
+// 		break;
+// 	default:
+// 		fprintf(stderr, "ERR: Unknown map_type(%u) cannot handle\n",
+// 			map_type);
+// 		return false;
+// 		break;
+// 	}
+
+// 	rec->total.rx_packets = value.rx_packets;
+// 	rec->total.rx_bytes   = value.rx_bytes;
+
+// 	return true;
+// }
 static bool map_collect(int fd, __u32 map_type, __u32 key, struct record *rec)
 {
-	struct datarec value;
+	// printf("map_collect\n");
+	struct Cms value;
 
 	/* Get time as close as possible to reading map contents */
 	rec->timestamp = gettime();
@@ -171,32 +235,46 @@ static bool map_collect(int fd, __u32 map_type, __u32 key, struct record *rec)
 		map_get_value_array(fd, key, &value);
 		break;
 	case BPF_MAP_TYPE_PERCPU_ARRAY:
-		/* fall-through */
+		map_get_value_percpu_array(fd, key, &value);
+		break;
 	default:
 		fprintf(stderr, "ERR: Unknown map_type(%u) cannot handle\n",
 			map_type);
 		return false;
 		break;
 	}
+	// printf("map_collect 2\n");
+	rec->total.cms[RIGA][COLONNA] = value.cms[RIGA][COLONNA];
+	// printf("map_collect 3\n");
 
-	/* Assignment#1: Add byte counters */
-	rec->total.rx_packets = value.rx_packets;
+
 	return true;
 }
 
+// static void stats_collect(int map_fd, __u32 map_type,
+// 			  struct stats_record *stats_rec)
+// {
+// 	/* Collect all XDP actions stats  */
+// 	__u32 key;
+
+// 	for (key = 0; key < XDP_ACTION_MAX; key++) {
+// 		map_collect(map_fd, map_type, key, &stats_rec->stats[key]);
+// 	}
+// }
 static void stats_collect(int map_fd, __u32 map_type,
 			  struct stats_record *stats_rec)
 {
-	/* Assignment#2: Collect other XDP actions stats  */
-	__u32 key = XDP_PASS;
+	/* Collect all XDP actions stats  */
+	__u32 key =0;
 
 	map_collect(map_fd, map_type, key, &stats_rec->stats[0]);
 }
 
+
 static void stats_poll(int map_fd, __u32 map_type, int interval)
 {
 	struct stats_record prev, record = { 0 };
-
+	printf("pool2\n");
 	/* Trick to pretty printf with thousands separators use %' */
 	setlocale(LC_NUMERIC, "en_US");
 
@@ -205,7 +283,7 @@ static void stats_poll(int map_fd, __u32 map_type, int interval)
 		printf("\n");
 		printf("%-12s\n", "XDP-action");
 	}
-
+	printf("statsCollect\n");
 	/* Get initial reading quickly */
 	stats_collect(map_fd, map_type, &record);
 	usleep(1000000/4);
@@ -266,6 +344,21 @@ static int __check_map_fd_info(int map_fd, struct bpf_map_info *info,
 
 	return 0;
 }
+// void unload(){
+// 	struct config cfg = {
+// 		.ifindex   = -1,
+// 		.do_unload = false,
+// 	};
+// 	char errmsg[1024];
+// 	int err = do_unload(&cfg);
+// 		if (err) {
+// 			libxdp_strerror(err, errmsg, sizeof(errmsg));
+// 			fprintf(stderr, "Couldn't unload XDP program %d: %s\n",
+// 				cfg.prog_id, errmsg);
+// 			return err;
+// 		}
+// 	printf("unload\n");
+// }
 
 int main(int argc, char **argv)
 {
@@ -273,6 +366,8 @@ int main(int argc, char **argv)
 	struct bpf_map_info info = { 0 };
 	struct xdp_program *program;
 	int stats_map_fd;
+	int cms_map_fd;
+
 	int interval = 2;
 	char errmsg[1024];
 	int err;
@@ -309,7 +404,7 @@ int main(int argc, char **argv)
 		printf("Success: Unloading XDP prog name: %s\n", cfg.progname);
 		return EXIT_OK;
 	}
-
+	printf("pre load\n");
 	program = load_bpf_and_xdp_attach(&cfg);
 	if (!program)
 		return EXIT_FAIL_BPF;
@@ -320,19 +415,52 @@ int main(int argc, char **argv)
 		printf(" - XDP prog id:%d attached on device:%s(ifindex:%d)\n",
 		       xdp_program__id(program), cfg.ifname, cfg.ifindex);
 	}
+	printf("post load\n");
+
+
+	// /* Lesson#3: Locate map file descriptor */
+	// stats_map_fd = find_map_fd(xdp_program__bpf_obj(program), "xdp_stats_map");
+	// if (stats_map_fd < 0) {
+	// 	/* xdp_link_detach(cfg.ifindex, cfg.xdp_flags, 0); */
+	// 	return EXIT_FAIL_BPF;
+	// }
+
+	// /* Lesson#4: check map info, e.g. datarec is expected size */
+	// map_expect.key_size    = sizeof(__u32);
+	// map_expect.value_size  = sizeof(struct datarec);
+	// map_expect.max_entries = XDP_ACTION_MAX;
+	// err = __check_map_fd_info(stats_map_fd, &info, &map_expect);
+	// if (err) {
+	// 	fprintf(stderr, "ERR: map via FD not compatible\n");
+	// 	return err;
+	// }
+	// if (verbose) {
+	// 	printf("\nCollecting stats from BPF map\n");
+	// 	printf(" - BPF map (bpf_map_type:%d) id:%d name:%s"
+	// 	       " key_size:%d value_size:%d max_entries:%d\n",
+	// 	       info.type, info.id, info.name,
+	// 	       info.key_size, info.value_size, info.max_entries
+	// 	       );
+	// }
+
+	// //autoUnload
+	// signal(SIGINT, unload);
+
+	// stats_poll(stats_map_fd, info.type, interval);
+
 
 	/* Lesson#3: Locate map file descriptor */
-	stats_map_fd = find_map_fd(xdp_program__bpf_obj(program), "xdp_stats_map");
-	if (stats_map_fd < 0) {
+	cms_map_fd = find_map_fd(xdp_program__bpf_obj(program), "cms_map");
+	if (cms_map_fd < 0) {
 		/* xdp_link_detach(cfg.ifindex, cfg.xdp_flags, 0); */
 		return EXIT_FAIL_BPF;
 	}
 
-	/* Lesson#4: check map info, e.g. datarec is expected size */
+	/* print struct Cms */
 	map_expect.key_size    = sizeof(__u32);
-	map_expect.value_size  = sizeof(struct datarec);
-	map_expect.max_entries = XDP_ACTION_MAX;
-	err = __check_map_fd_info(stats_map_fd, &info, &map_expect);
+	map_expect.value_size  = sizeof(struct Cms);
+	map_expect.max_entries = 1;
+	err = __check_map_fd_info(cms_map_fd, &info, &map_expect);
 	if (err) {
 		fprintf(stderr, "ERR: map via FD not compatible\n");
 		return err;
@@ -345,7 +473,9 @@ int main(int argc, char **argv)
 		       info.key_size, info.value_size, info.max_entries
 		       );
 	}
+	printf("pool\n");
+	stats_poll(cms_map_fd, info.type, interval);
 
-	stats_poll(stats_map_fd, info.type, interval);
+	
 	return EXIT_OK;
 }
