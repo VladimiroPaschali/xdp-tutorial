@@ -2,22 +2,24 @@
 #+TITLE: Fork of XDP Programming Hands-On Tutorial
 #+OPTIONS: ^:nil
 
-This repository contains the folder count min that generates a mutidimensional array #define 4 by 131072 where the packet flows
+This repository contains the folder count min that generates a mutidimensional array 4 by 131072 where the packet flows
 are hashed and saved.
-To hash the packet flow (ip_src, ip_dst, proto, src_port, dst_port) i used xxHash.
+
+To hash the packet flow =(ip_src, ip_dst, proto, src_port, dst_port)= i used [[https://github.com/Cyan4973/xxHash/tree/dev][xxHash]].
+
 To install xxHash follow the following steps outside of the xdp-tutorial folder.
 
-### Building xxHash - Using vcpkg
+*** Building xxHash - Using vcpkg
 
-You can download and install xxHash using the [vcpkg](https://github.com/Microsoft/vcpkg) dependency manager:
-
+You can download and install xxHash using the [[https://github.com/Microsoft/vcpkg][vcpkg]] dependency manager:
+#+begin_example
     git clone https://github.com/Microsoft/vcpkg.git
     cd vcpkg
     ./bootstrap-vcpkg.sh
     ./vcpkg integrate install
     ./vcpkg install xxhash
-
-The xxHash port in vcpkg is kept up to date by Microsoft team members and community contributors. If the version is out of date, please [create an issue or pull request](https://github.com/Microsoft/vcpkg) on the vcpkg repository.
+#+end_example
+The xxHash port in vcpkg is kept up to date by Microsoft team members and community contributors. If the version is out of date, please [[https://github.com/Microsoft/vcpkg][create an issue or pull request]] on the vcpkg repository.
 
 * Original repo:
 
